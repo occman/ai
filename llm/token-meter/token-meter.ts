@@ -52,7 +52,8 @@ export interface TokenMeter {
   trackUsage(response: SupportedResponse, stripeCustomerId: string): void;
 
   /**
-   * Track usage from OpenAI streaming response
+   * Track usage from OpenAI streaming response (also OpenRouter streams
+   * produced by the OpenAI SDK pointed at https://openrouter.ai/api/v1)
    * Model name is automatically extracted from the stream
    * Returns the wrapped stream for consumption
    */

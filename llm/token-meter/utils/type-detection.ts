@@ -11,7 +11,12 @@ import type {GenerateContentResult} from '@google/generative-ai';
 /**
  * Provider types
  */
-export type Provider = 'openai' | 'anthropic' | 'google' | 'unknown';
+export type Provider =
+  | 'openai'
+  | 'openrouter'
+  | 'anthropic'
+  | 'google'
+  | 'unknown';
 
 /**
  * Response type categories
@@ -43,6 +48,21 @@ function isOpenAIChatCompletion(response: any): response is OpenAI.ChatCompletio
     'choices' in response &&
     'model' in response &&
     response.choices?.[0]?.message !== undefined
+  );
+}
+
+/**
+ * Check if an OpenAI-compatible chat completion (or stream chunk) was produced
+ * by OpenRouter. OpenRouter reports `usage.cost` and may attach the upstream
+ * `provider` name and `openrouter_metadata`; plain OpenAI responses have none.
+ */
+export function isOpenRouterCompletion(response: any): boolean {
+  return (
+    response &&
+    typeof response === 'object' &&
+    (response.usage?.cost !== undefined ||
+      'openrouter_metadata' in response ||
+      typeof response.provider === 'string')
   );
 }
 
@@ -111,10 +131,10 @@ function isGeminiResponse(response: any): response is GenerateContentResult {
  * Detect and extract usage information from a response
  */
 export function detectResponse(response: any): DetectedResponse | null {
-  // OpenAI Chat Completion
+  // OpenAI-compatible Chat Completion (OpenAI or OpenRouter)
   if (isOpenAIChatCompletion(response)) {
     return {
-      provider: 'openai',
+      provider: isOpenRouterCompletion(response) ? 'openrouter' : 'openai',
       type: 'chat_completion',
       model: response.model,
       inputTokens: response.usage?.prompt_tokens ?? 0,
@@ -207,6 +227,7 @@ export async function extractUsageFromChatStream(
     completion_tokens: 0,
   };
   let model = '';
+  let openrouter = false;
 
   try {
     for await (const chunk of stream) {
@@ -216,11 +237,14 @@ export async function extractUsageFromChatStream(
       if (chunk.usage) {
         usage = chunk.usage;
       }
+      if (isOpenRouterCompletion(chunk)) {
+        openrouter = true;
+      }
     }
 
     if (model) {
       return {
-        provider: 'openai',
+        provider: openrouter ? 'openrouter' : 'openai',
         type: 'chat_completion',
         model,
         inputTokens: usage.prompt_tokens ?? 0,
