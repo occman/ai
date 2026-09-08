@@ -72,17 +72,7 @@ class StripeAgentToolkit extends McpServer {
         _extra: RequestHandlerExtra<any, any>
       ) => {
         try {
-          // If args.customer exists, pass it as override to callTool
-          // callTool will handle fallback to connection-time customer
-          const options = args.customer
-            ? {customer: args.customer as string}
-            : undefined;
-
-          const result = await this._mcpClient.callTool(
-            remoteTool.name,
-            args,
-            options
-          );
+          const result = await this._mcpClient.callTool(remoteTool.name, args);
           return {
             content: [
               {
