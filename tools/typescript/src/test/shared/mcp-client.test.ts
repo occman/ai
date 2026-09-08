@@ -196,6 +196,84 @@ describe('StripeMcpClient', () => {
     });
   });
 
+  describe('customer scoping', () => {
+    const getClientCallTool = (): jest.Mock => {
+      const {Client} = require('@modelcontextprotocol/sdk/client/index.js');
+      return Client.mock.results[Client.mock.results.length - 1].value.callTool;
+    };
+
+    it('should inject the configured customer when args omit it', async () => {
+      const client = new StripeMcpClient({
+        secretKey: 'rk_test_123',
+        context: {customer: 'cus_configured'},
+      });
+      await client.connect();
+
+      await client.callTool('list_customers', {limit: 5});
+
+      expect(getClientCallTool()).toHaveBeenCalledWith({
+        name: 'list_customers',
+        arguments: {limit: 5, customer: 'cus_configured'},
+      });
+    });
+
+    it('should accept args.customer that matches the configured customer', async () => {
+      const client = new StripeMcpClient({
+        secretKey: 'rk_test_123',
+        context: {customer: 'cus_configured'},
+      });
+      await client.connect();
+
+      await client.callTool('list_customers', {customer: 'cus_configured'});
+
+      expect(getClientCallTool()).toHaveBeenCalledWith({
+        name: 'list_customers',
+        arguments: {customer: 'cus_configured'},
+      });
+    });
+
+    it('should reject args.customer that conflicts with the configured customer', async () => {
+      const client = new StripeMcpClient({
+        secretKey: 'rk_test_123',
+        context: {customer: 'cus_configured'},
+      });
+      await client.connect();
+
+      await expect(
+        client.callTool('list_customers', {customer: 'cus_other'})
+      ).rejects.toThrow(
+        "Customer context conflict: tool 'list_customers' was called with customer 'cus_other', but this toolkit is configured for customer 'cus_configured'"
+      );
+
+      expect(getClientCallTool()).not.toHaveBeenCalled();
+      expect(consoleSpy).not.toHaveBeenCalled();
+    });
+
+    it('should pass args.customer through when no customer is configured', async () => {
+      const client = new StripeMcpClient({secretKey: 'rk_test_123'});
+      await client.connect();
+
+      await client.callTool('list_customers', {customer: 'cus_from_args'});
+
+      expect(getClientCallTool()).toHaveBeenCalledWith({
+        name: 'list_customers',
+        arguments: {customer: 'cus_from_args'},
+      });
+    });
+
+    it('should not add a customer when none is configured or supplied', async () => {
+      const client = new StripeMcpClient({secretKey: 'rk_test_123'});
+      await client.connect();
+
+      await client.callTool('list_customers', {limit: 5});
+
+      expect(getClientCallTool()).toHaveBeenCalledWith({
+        name: 'list_customers',
+        arguments: {limit: 5},
+      });
+    });
+  });
+
   describe('context handling', () => {
     it('should pass account context in headers', async () => {
       const {

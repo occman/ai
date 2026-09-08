@@ -141,32 +141,33 @@ export class StripeMcpClient {
     return this.tools;
   }
 
-  async callTool(
-    name: string,
-    args: Record<string, unknown>,
-    options?: {customer?: string}
-  ): Promise<string> {
+  async callTool(name: string, args: Record<string, unknown>): Promise<string> {
     if (!this.initializer.isInitialized || !this.client) {
       throw new Error(
         'MCP client not connected. Call connect() before calling tools.'
       );
     }
 
-    // Customer priority: per-call override > connection-time context > none
-    const customer = options?.customer ?? this.config.context?.customer;
-
-    // Validate for conflicts - warn if args.customer exists and differs from override
-    if (customer && args.customer && args.customer !== customer) {
-      console.warn(
-        `[Stripe Agent Toolkit] Customer context conflict detected:\n` +
-          `  - Tool args.customer: ${args.customer}\n` +
-          `  - Override customer: ${customer}\n` +
-          `  Using override customer. This may indicate a bug in your code.`
+    // The configured customer scopes every call. A caller-supplied customer
+    // may not widen that scope; only an explicit match is tolerated.
+    const configuredCustomer = this.config.context?.customer;
+    if (
+      configuredCustomer &&
+      args.customer !== undefined &&
+      args.customer !== null &&
+      args.customer !== configuredCustomer
+    ) {
+      throw new Error(
+        `Customer context conflict: tool '${name}' was called with ` +
+          `customer '${String(args.customer)}', but this toolkit is ` +
+          `configured for customer '${configuredCustomer}'. Omit the ` +
+          `customer argument or configure the toolkit for that customer.`
       );
     }
 
-    // Inject customer into args if present
-    const finalArgs = customer ? {...args, customer} : args;
+    const finalArgs = configuredCustomer
+      ? {...args, customer: configuredCustomer}
+      : args;
 
     try {
       const result = (await this.client.callTool({
