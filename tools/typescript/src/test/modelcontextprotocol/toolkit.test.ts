@@ -1,3 +1,4 @@
+import {z} from 'zod';
 import {createStripeAgentToolkit} from '@/modelcontextprotocol/toolkit';
 
 type ToolHandler = (
@@ -5,7 +6,12 @@ type ToolHandler = (
   extra: unknown
 ) => Promise<{content: Array<{type: string; text: string}>}>;
 
-const mockRegisteredTools = new Map<string, ToolHandler>();
+interface RegisteredTool {
+  shape: z.ZodRawShape;
+  handler: ToolHandler;
+}
+
+const mockRegisteredTools = new Map<string, RegisteredTool>();
 const mockRemoteCallTool = jest.fn();
 
 jest.mock('@modelcontextprotocol/sdk/server/mcp.js', () => ({
@@ -13,10 +19,10 @@ jest.mock('@modelcontextprotocol/sdk/server/mcp.js', () => ({
     tool(
       name: string,
       _description: string,
-      _shape: unknown,
+      shape: z.ZodRawShape,
       handler: ToolHandler
     ): void {
-      mockRegisteredTools.set(name, handler);
+      mockRegisteredTools.set(name, {shape, handler});
     }
   },
 }));
@@ -35,6 +41,18 @@ jest.mock('@modelcontextprotocol/sdk/client/index.js', () => ({
               customer: {type: 'string'},
               limit: {type: 'number'},
             },
+          },
+        },
+        {
+          name: 'create_invoice',
+          description: 'Create an invoice',
+          inputSchema: {
+            type: 'object',
+            properties: {
+              customer: {type: 'string'},
+              days_until_due: {type: 'number'},
+            },
+            required: ['customer'],
           },
         },
       ],
@@ -57,10 +75,19 @@ describe('StripeAgentToolkit (modelcontextprotocol)', () => {
     });
   });
 
-  const callProxyTool = (name: string, args: Record<string, unknown>) => {
-    const handler = mockRegisteredTools.get(name);
-    if (!handler) {
+  const getRegisteredTool = (name: string): RegisteredTool => {
+    const tool = mockRegisteredTools.get(name);
+    if (!tool) {
       throw new Error(`Tool ${name} was not registered`);
+    }
+    return tool;
+  };
+
+  const callProxyTool = (name: string, args: Record<string, unknown>) => {
+    const {shape, handler} = getRegisteredTool(name);
+    const parsed = z.object(shape).safeParse(args);
+    if (!parsed.success) {
+      return Promise.reject(parsed.error);
     }
     return handler(args, {});
   };
@@ -108,6 +135,38 @@ describe('StripeAgentToolkit (modelcontextprotocol)', () => {
         name: 'list_subscriptions',
         arguments: {customer: 'cus_configured'},
       });
+    });
+
+    it('should supply the configured customer to tools that require it', async () => {
+      await createStripeAgentToolkit({
+        secretKey: 'rk_test_123',
+        configuration: {context: {customer: 'cus_configured'}},
+      });
+
+      const {shape} = getRegisteredTool('create_invoice');
+      expect(shape.customer.isOptional()).toBe(true);
+
+      await callProxyTool('create_invoice', {days_until_due: 30});
+
+      expect(mockRemoteCallTool).toHaveBeenCalledWith({
+        name: 'create_invoice',
+        arguments: {days_until_due: 30, customer: 'cus_configured'},
+      });
+    });
+
+    it('should keep customer required when none is configured', async () => {
+      await createStripeAgentToolkit({
+        secretKey: 'rk_test_123',
+        configuration: {},
+      });
+
+      const {shape} = getRegisteredTool('create_invoice');
+      expect(shape.customer.isOptional()).toBe(false);
+
+      await expect(
+        callProxyTool('create_invoice', {days_until_due: 30})
+      ).rejects.toBeInstanceOf(z.ZodError);
+      expect(mockRemoteCallTool).not.toHaveBeenCalled();
     });
 
     it('should allow a client-supplied customer when none is configured', async () => {

@@ -60,8 +60,13 @@ class StripeAgentToolkit extends McpServer {
    */
   private registerProxyTool(remoteTool: McpTool): void {
     // Convert JSON Schema to Zod shape for MCP SDK tool registration
-    // This properly handles the 'required' field and type validation
-    const zodShape = jsonSchemaToZodShape(remoteTool.inputSchema);
+    // This properly handles the 'required' field and type validation.
+    // A configured customer is injected at call time, so callers need not
+    // supply it even when the remote schema requires it.
+    const inputSchema = this._configuration.context?.customer
+      ? this.withOptionalCustomer(remoteTool.inputSchema)
+      : remoteTool.inputSchema;
+    const zodShape = jsonSchemaToZodShape(inputSchema);
 
     this.tool(
       remoteTool.name,
@@ -91,6 +96,18 @@ class StripeAgentToolkit extends McpServer {
         }
       }
     );
+  }
+
+  private withOptionalCustomer(
+    schema: McpTool['inputSchema']
+  ): McpTool['inputSchema'] {
+    if (!schema?.required?.includes('customer')) {
+      return schema;
+    }
+    return {
+      ...schema,
+      required: schema.required.filter((key) => key !== 'customer'),
+    };
   }
 
   /**
