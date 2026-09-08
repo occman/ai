@@ -36,6 +36,30 @@ function normalizeModelName(provider: string, model: string): string {
 }
 
 /**
+ * Build the fully qualified `<provider>/<model>` name Stripe expects.
+ *
+ * OpenRouter models are already `<vendor>/<model>[:variant]` slugs
+ * (e.g. `anthropic/claude-3-5-sonnet-20241022:beta`), so the vendor is
+ * used as the billing provider and normalized with that vendor's rules,
+ * yielding `anthropic/claude-3.5-sonnet` rather than
+ * `openrouter/anthropic/claude-3-5-sonnet-20241022:beta`.
+ */
+export function buildFullModelName(provider: string, model: string): string {
+  if (provider === 'openrouter') {
+    const slug = model.replace(/:[^/]+$/, '');
+    const separator = slug.indexOf('/');
+    if (separator > 0) {
+      const vendor = slug.slice(0, separator);
+      const vendorModel = slug.slice(separator + 1);
+      return vendor + '/' + normalizeModelName(vendor, vendorModel);
+    }
+    return provider + '/' + slug;
+  }
+
+  return provider + '/' + normalizeModelName(provider, model);
+}
+
+/**
  * Send meter events to Stripe
  */
 export async function sendMeterEventsToStripe(
@@ -46,8 +70,7 @@ export async function sendMeterEventsToStripe(
   const timestamp = new Date().toISOString();
 
   // Normalize the model name before sending to Stripe
-  const normalizedModel = normalizeModelName(event.provider, event.model);
-  const fullModelName = event.provider + '/' + normalizedModel;
+  const fullModelName = buildFullModelName(event.provider, event.model);
 
   try {
     if (event.usage.inputTokens > 0) {

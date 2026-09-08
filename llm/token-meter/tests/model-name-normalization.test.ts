@@ -140,5 +140,43 @@ describe('Model Name Normalization - Comprehensive', () => {
       });
     });
   });
+
+  describe('OpenRouter Models', () => {
+    // OpenRouter slugs are already <vendor>/<model>, so the vendor becomes the
+    // billing provider and is normalized with that vendor's rules.
+    const testCases = [
+      {model: 'anthropic/claude-sonnet-4', expected: 'anthropic/claude-sonnet-4'},
+      {model: 'anthropic/claude-3-5-sonnet-20241022', expected: 'anthropic/claude-3.5-sonnet'},
+      {model: 'anthropic/claude-opus-4-1', expected: 'anthropic/claude-opus-4.1'},
+      {model: 'openai/gpt-4o', expected: 'openai/gpt-4o'},
+      {model: 'openai/gpt-4o-2024-11-20', expected: 'openai/gpt-4o'},
+      {model: 'openai/o3-mini', expected: 'openai/o3-mini'},
+      {model: 'google/gemini-2.5-pro', expected: 'google/gemini-2.5-pro'},
+      {model: 'meta-llama/llama-3.3-70b-instruct', expected: 'meta-llama/llama-3.3-70b-instruct'},
+      // Variant suffixes should be removed
+      {model: 'anthropic/claude-sonnet-4:thinking', expected: 'anthropic/claude-sonnet-4'},
+      {model: 'meta-llama/llama-3.3-70b-instruct:free', expected: 'meta-llama/llama-3.3-70b-instruct'},
+      {model: 'openai/gpt-4o:nitro', expected: 'openai/gpt-4o'},
+      // No vendor in the slug
+      {model: 'auto', expected: 'openrouter/auto'},
+    ];
+
+    testCases.forEach(({model, expected}) => {
+      it(`should normalize ${model} to ${expected}`, async () => {
+        const config: MeterConfig = {};
+        const event: UsageEvent = {
+          model,
+          provider: 'openrouter',
+          usage: {inputTokens: 100, outputTokens: 50},
+          stripeCustomerId: 'cus_123',
+        };
+
+        await sendMeterEventsToStripe(mockStripe, config, event);
+
+        const call = mockStripe.v2.billing.meterEvents.create.mock.calls[0][0];
+        expect(call.payload.model).toBe(expected);
+      });
+    });
+  });
 });
 

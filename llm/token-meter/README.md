@@ -26,6 +26,7 @@ npm install @stripe/token-meter
 ## Supported providers
 
 - **OpenAI**: Chat Completions, Responses API, Embeddings (streaming and non-streaming)
+- **OpenRouter**: Chat Completions via the OpenAI SDK (streaming and non-streaming), billed under the upstream vendor model
 - **Anthropic**: Messages API (streaming and non-streaming)
 - **Google Gemini**: GenerateContent API (streaming and non-streaming)
 
@@ -47,6 +48,29 @@ const response = await openai.chat.completions.create({
 });
 
 meter.trackUsage(response, 'cus_xxxxx');
+```
+
+### OpenRouter
+
+OpenRouter is OpenAI-compatible, so use the OpenAI SDK with `baseURL` set to OpenRouter. Responses are detected as OpenRouter and billed under the routed model's vendor (`anthropic/claude-sonnet-4`, not `openai/anthropic/claude-sonnet-4`).
+
+```typescript
+import OpenAI from 'openai';
+import { createTokenMeter } from '@stripe/token-meter';
+
+const openrouter = new OpenAI({
+  apiKey: process.env.OPENROUTER_API_KEY,
+  baseURL: 'https://openrouter.ai/api/v1',
+});
+const meter = createTokenMeter(process.env.STRIPE_API_KEY);
+
+// Non-streaming
+const response = await openrouter.chat.completions.create({
+  model: 'anthropic/claude-sonnet-4',
+  messages: [{ role: 'user', content: 'Hello!' }],
+});
+
+meter.trackUsage(response, 'cus_xxxxx'); // billed as anthropic/claude-sonnet-4
 ```
 
 ### Anthropic
@@ -101,11 +125,11 @@ Creates a token meter instance for tracking usage.
 Tracks usage from a non-streaming response (fire-and-forget).
 
 **Parameters:**
-- `response`: The response object from OpenAI, Anthropic, or Google
+- `response`: The response object from OpenAI, OpenRouter, Anthropic, or Google
 - `customerId` (string): Stripe customer ID to attribute usage to
 
 **Supported response types:**
-- `OpenAI.ChatCompletion`
+- `OpenAI.ChatCompletion` (OpenAI or OpenRouter)
 - `OpenAI.Responses.Response`
 - `OpenAI.CreateEmbeddingResponse`
 - `Anthropic.Messages.Message`
@@ -113,15 +137,15 @@ Tracks usage from a non-streaming response (fire-and-forget).
 
 ### `TokenMeter.trackUsageStreamOpenAI(stream, customerId)`
 
-Wraps an OpenAI streaming response for usage tracking.
+Wraps an OpenAI (or OpenRouter) streaming response for usage tracking.
 
 **Parameters:**
-- `stream`: OpenAI stream (Chat Completions or Responses API)
+- `stream`: OpenAI stream (Chat Completions or Responses API), including Chat Completions streams from OpenRouter
 - `customerId` (string): Stripe customer ID
 
 **Returns:** The wrapped stream (can be consumed normally)
 
-**Important:** For OpenAI streaming, include `stream_options: { include_usage: true }` in your request.
+**Important:** For OpenAI streaming, include `stream_options: { include_usage: true }` in your request. OpenRouter streams always include usage in the final chunk.
 
 ### `TokenMeter.trackUsageStreamAnthropic(stream, customerId)`
 
@@ -160,6 +184,31 @@ const stream = await openai.chat.completions.create({
   messages: [{ role: 'user', content: 'Count to 5' }],
   stream: true,
   stream_options: { include_usage: true }, // Required for metering
+});
+
+const meteredStream = meter.trackUsageStreamOpenAI(stream, 'cus_xxxxx');
+
+for await (const chunk of meteredStream) {
+  process.stdout.write(chunk.choices[0]?.delta?.content || '');
+}
+```
+
+### OpenRouter streaming
+
+```typescript
+import OpenAI from 'openai';
+import { createTokenMeter } from '@stripe/token-meter';
+
+const openrouter = new OpenAI({
+  apiKey: process.env.OPENROUTER_API_KEY,
+  baseURL: 'https://openrouter.ai/api/v1',
+});
+const meter = createTokenMeter(process.env.STRIPE_API_KEY);
+
+const stream = await openrouter.chat.completions.create({
+  model: 'openai/gpt-4o-mini',
+  messages: [{ role: 'user', content: 'Count to 5' }],
+  stream: true,
 });
 
 const meteredStream = meter.trackUsageStreamOpenAI(stream, 'cus_xxxxx');
@@ -264,6 +313,12 @@ The token meter:
 4. **Non-Blocking**: Never interrupts your application flow
 
 For streaming responses, the meter wraps the stream and reports usage after the stream completes.
+
+### Model names
+
+Meter events use `<provider>/<model>` names matching Stripe's approved model list. Date and `-latest` suffixes are removed (`claude-3-5-sonnet-20241022` → `anthropic/claude-3.5-sonnet`, `gpt-4o-2024-11-20` → `openai/gpt-4o`).
+
+OpenRouter responses are identified by their OpenRouter-specific fields (`usage.cost`, `provider`, `openrouter_metadata`). Because OpenRouter model slugs are already `<vendor>/<model>`, the vendor is used as the billing provider and normalized with that vendor's rules; `:variant` suffixes such as `:free`, `:nitro` or `:thinking` are removed. For example `anthropic/claude-3-5-sonnet-20241022:beta` is billed as `anthropic/claude-3.5-sonnet`, and a slug without a vendor (`auto`) is billed as `openrouter/auto`.
 
 ## Stripe meter events
 
