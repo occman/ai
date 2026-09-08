@@ -8,7 +8,10 @@
 
 import Stripe from 'stripe';
 import {createTokenMeter} from '../token-meter';
-import {detectResponse} from '../utils/type-detection';
+import {
+  detectResponse,
+  extractUsageFromChatStream,
+} from '../utils/type-detection';
 import type {MeterConfig} from '../types';
 
 // Mock Stripe
@@ -114,6 +117,63 @@ describe('TokenMeter - OpenRouter Provider', () => {
       };
 
       expect(detectResponse(response)?.provider).toBe('openai');
+    });
+
+    it('should detect OpenRouter from provider + vendor slug when usage has no cost', () => {
+      const response = openRouterCompletion({
+        usage: {prompt_tokens: 10, completion_tokens: 25, total_tokens: 35},
+      });
+
+      expect(detectResponse(response)?.provider).toBe('openrouter');
+    });
+
+    it('should keep a non-OpenRouter completion with a provider field as openai (regression)', () => {
+      const response = {
+        id: 'chatcmpl-456',
+        object: 'chat.completion',
+        created: Date.now(),
+        model: 'gpt-4o',
+        provider: 'azure',
+        choices: [
+          {index: 0, message: {role: 'assistant', content: 'Hi'}, finish_reason: 'stop'},
+        ],
+        usage: {prompt_tokens: 12, completion_tokens: 5, total_tokens: 17},
+      };
+
+      expect(detectResponse(response)).toEqual({
+        provider: 'openai',
+        type: 'chat_completion',
+        model: 'gpt-4o',
+        inputTokens: 12,
+        outputTokens: 5,
+      });
+    });
+
+    it('should keep a non-OpenRouter stream with a provider field as openai (regression)', async () => {
+      const chunks = [
+        {
+          id: 'chatcmpl-456',
+          object: 'chat.completion.chunk',
+          model: 'gpt-4o',
+          provider: 'azure',
+          choices: [{index: 0, delta: {content: 'Hi'}, finish_reason: null}],
+        },
+        {
+          id: 'chatcmpl-456',
+          object: 'chat.completion.chunk',
+          model: 'gpt-4o',
+          provider: 'azure',
+          choices: [],
+          usage: {prompt_tokens: 12, completion_tokens: 5, total_tokens: 17},
+        },
+      ];
+
+      const detected = await extractUsageFromChatStream(
+        createMockStreamWithTee(chunks).tee()[0] as any
+      );
+
+      expect(detected?.provider).toBe('openai');
+      expect(detected?.model).toBe('gpt-4o');
     });
   });
 

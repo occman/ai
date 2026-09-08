@@ -53,16 +53,21 @@ function isOpenAIChatCompletion(response: any): response is OpenAI.ChatCompletio
 
 /**
  * Check if an OpenAI-compatible chat completion (or stream chunk) was produced
- * by OpenRouter. OpenRouter reports `usage.cost` and may attach the upstream
- * `provider` name and `openrouter_metadata`; plain OpenAI responses have none.
+ * by OpenRouter. `usage.cost` and `openrouter_metadata` are OpenRouter-only;
+ * a top-level upstream `provider` name only counts together with OpenRouter's
+ * `<vendor>/<model>` slug, since other gateways may echo a provider field.
  */
 export function isOpenRouterCompletion(response: any): boolean {
+  if (!response || typeof response !== 'object') {
+    return false;
+  }
+  if (response.usage?.cost !== undefined || 'openrouter_metadata' in response) {
+    return true;
+  }
   return (
-    response &&
-    typeof response === 'object' &&
-    (response.usage?.cost !== undefined ||
-      'openrouter_metadata' in response ||
-      typeof response.provider === 'string')
+    typeof response.provider === 'string' &&
+    typeof response.model === 'string' &&
+    response.model.indexOf('/') > 0
   );
 }
 
