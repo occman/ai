@@ -11,7 +11,12 @@ import type {GenerateContentResult} from '@google/generative-ai';
 /**
  * Provider types
  */
-export type Provider = 'openai' | 'anthropic' | 'google' | 'unknown';
+export type Provider =
+  | 'openai'
+  | 'anthropic'
+  | 'google'
+  | 'openrouter'
+  | 'unknown';
 
 /**
  * Response type categories
@@ -43,6 +48,24 @@ function isOpenAIChatCompletion(response: any): response is OpenAI.ChatCompletio
     'choices' in response &&
     'model' in response &&
     response.choices?.[0]?.message !== undefined
+  );
+}
+
+/**
+ * Check if an OpenAI-shaped chat completion (or stream chunk) was served by
+ * OpenRouter. OpenRouter always includes `usage.cost`; responses may also
+ * carry `openrouter_metadata` or a top-level upstream `provider` string.
+ * The `<vendor>/<model>` slug alone is not used as a signal because other
+ * OpenAI-compatible gateways use slugs too.
+ */
+export function isOpenRouterCompletion(response: any): boolean {
+  if (!response || typeof response !== 'object') {
+    return false;
+  }
+  return (
+    response.usage?.cost !== undefined ||
+    response.openrouter_metadata !== undefined ||
+    typeof response.provider === 'string'
   );
 }
 
@@ -111,10 +134,11 @@ function isGeminiResponse(response: any): response is GenerateContentResult {
  * Detect and extract usage information from a response
  */
 export function detectResponse(response: any): DetectedResponse | null {
-  // OpenAI Chat Completion
+  // OpenAI Chat Completion (or an OpenAI-compatible completion served by OpenRouter)
   if (isOpenAIChatCompletion(response)) {
+    // OpenRouter's completion_tokens already includes reasoning tokens
     return {
-      provider: 'openai',
+      provider: isOpenRouterCompletion(response) ? 'openrouter' : 'openai',
       type: 'chat_completion',
       model: response.model,
       inputTokens: response.usage?.prompt_tokens ?? 0,
@@ -207,6 +231,7 @@ export async function extractUsageFromChatStream(
     completion_tokens: 0,
   };
   let model = '';
+  let isOpenRouter = false;
 
   try {
     for await (const chunk of stream) {
@@ -216,11 +241,14 @@ export async function extractUsageFromChatStream(
       if (chunk.usage) {
         usage = chunk.usage;
       }
+      if (isOpenRouterCompletion(chunk)) {
+        isOpenRouter = true;
+      }
     }
 
     if (model) {
       return {
-        provider: 'openai',
+        provider: isOpenRouter ? 'openrouter' : 'openai',
         type: 'chat_completion',
         model,
         inputTokens: usage.prompt_tokens ?? 0,

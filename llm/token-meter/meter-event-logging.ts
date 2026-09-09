@@ -36,6 +36,29 @@ function normalizeModelName(provider: string, model: string): string {
 }
 
 /**
+ * Build the `<provider>/<model>` name sent to Stripe.
+ *
+ * OpenRouter model slugs are already `<vendor>/<model>[:variant]`, so the
+ * vendor becomes the Stripe provider segment and the variant suffix is
+ * dropped (`anthropic/claude-sonnet-4:thinking` -> `anthropic/claude-sonnet-4`).
+ * Slugs without a vendor fall back to `openrouter/<model>`.
+ */
+export function buildStripeModelName(provider: string, model: string): string {
+  if (provider === 'openrouter') {
+    const slug = model.replace(/:[^/]*$/, '');
+    const separator = slug.indexOf('/');
+    if (separator === -1) {
+      return 'openrouter/' + slug;
+    }
+    const vendor = slug.slice(0, separator);
+    const vendorModel = slug.slice(separator + 1);
+    return vendor + '/' + normalizeModelName(vendor, vendorModel);
+  }
+
+  return provider + '/' + normalizeModelName(provider, model);
+}
+
+/**
  * Send meter events to Stripe
  */
 export async function sendMeterEventsToStripe(
@@ -46,8 +69,7 @@ export async function sendMeterEventsToStripe(
   const timestamp = new Date().toISOString();
 
   // Normalize the model name before sending to Stripe
-  const normalizedModel = normalizeModelName(event.provider, event.model);
-  const fullModelName = event.provider + '/' + normalizedModel;
+  const fullModelName = buildStripeModelName(event.provider, event.model);
 
   try {
     if (event.usage.inputTokens > 0) {
