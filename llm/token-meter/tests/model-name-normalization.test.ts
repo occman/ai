@@ -140,5 +140,45 @@ describe('Model Name Normalization - Comprehensive', () => {
       });
     });
   });
+
+  describe('OpenRouter Models', () => {
+    const testCases = [
+      // Vendor slug is used as the Stripe provider segment
+      {model: 'anthropic/claude-sonnet-4', expected: 'anthropic/claude-sonnet-4'},
+      {model: 'openai/gpt-4o-mini', expected: 'openai/gpt-4o-mini'},
+      {model: 'google/gemini-2.5-flash', expected: 'google/gemini-2.5-flash'},
+      {model: 'meta-llama/llama-3.3-70b-instruct', expected: 'meta-llama/llama-3.3-70b-instruct'},
+      // Vendor-specific normalization rules are applied
+      {model: 'anthropic/claude-3-5-sonnet-20241022', expected: 'anthropic/claude-3.5-sonnet'},
+      {model: 'anthropic/claude-opus-4-1', expected: 'anthropic/claude-opus-4.1'},
+      {model: 'openai/gpt-4o-2024-11-20', expected: 'openai/gpt-4o'},
+      {model: 'openai/gpt-4o-2024-05-13', expected: 'openai/gpt-4o-2024-05-13'},
+      // :variant suffixes are stripped
+      {model: 'anthropic/claude-sonnet-4:thinking', expected: 'anthropic/claude-sonnet-4'},
+      {model: 'meta-llama/llama-3.3-70b-instruct:free', expected: 'meta-llama/llama-3.3-70b-instruct'},
+      {model: 'openai/gpt-4o-mini:nitro', expected: 'openai/gpt-4o-mini'},
+      {model: 'deepseek/deepseek-r1:floor', expected: 'deepseek/deepseek-r1'},
+      // Slugs without a vendor fall back to openrouter/<model>
+      {model: 'auto', expected: 'openrouter/auto'},
+      {model: 'auto:free', expected: 'openrouter/auto'},
+    ];
+
+    testCases.forEach(({model, expected}) => {
+      it(`should normalize ${model} to ${expected}`, async () => {
+        const config: MeterConfig = {};
+        const event: UsageEvent = {
+          model,
+          provider: 'openrouter',
+          usage: {inputTokens: 100, outputTokens: 50},
+          stripeCustomerId: 'cus_123',
+        };
+
+        await sendMeterEventsToStripe(mockStripe, config, event);
+
+        const call = mockStripe.v2.billing.meterEvents.create.mock.calls[0][0];
+        expect(call.payload.model).toBe(expected);
+      });
+    });
+  });
 });
 
